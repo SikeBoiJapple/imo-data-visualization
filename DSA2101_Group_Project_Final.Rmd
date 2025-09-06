@@ -1,0 +1,684 @@
+---
+title: "DSA2101 Group Project"
+author: Lim Fang Jun, Ong Wei Lun, Angel Bu Tong Mei, Lee Jia Hong
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+date: "2025-04-18"
+---
+
+<style>
+#TOC {
+  color: #36454F;
+  font-family: Calibri;
+  font-size: 16px; 
+  border-color: #708090;
+}
+#header {
+  color: #000080;
+  background-color: #F5F5F5;
+  opacity: 0.8;
+  font-family: Georgia, serif;
+  text-align: center;
+  font-size: 20px;
+}
+body {
+  color: #36454F;
+  font-family: Calibri;
+  background-color: #F5F5F5;
+}
+pre {
+  color: #708090;
+  background-color: #F8F8FF;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(purrr)
+library(knitr)
+library(kableExtra)
+library(gt)
+```
+
+## Introduction
+
+The International Mathematical Olympiad (IMO) is the global competition for high‐school mathematicians, drawing teams of six from over 100 countries each year to tackle six challenging problems over two days. For this analysis, we use the publicly available IMO data from the TidyTuesday project, focusing specifically on the top five performing countries in 2024, which are Belarus, India, People’s Republic of China, Republic of Korea, and the United States of America. To ensure consistency and sufficient historical context, we restrict our study period to the years 2000 through 2024. By concentrating on these elite teams, which participate regularly and maintain complete records, we can more reliably track trends and draw meaningful comparisons across years.
+
+Below are the variable list that we will use in our 2 main dataset:
+
+### `country_results_df.csv` variable description
+
+```{r variable table, echo=FALSE, warning=FALSE}
+country_results_df_variable<- data.frame(
+   variable = c("year", "country", "team_size_all", "p1", "p2", "p3", "p4", "p5", "p6", "awards_gold", "awards_silver", "awards_bronze","awards_honorable_mentions"),
+  class = c("integer", "character","integer","integer","integer","integer","integer","integer","integer","integer","integer","integer","integer"),
+  description = c("Year of IMO","Participating country","Participating contestants","Score on problem 1","Score on problem 2","Score on problem 3","Score on problem 4","Score on problem 5","Score on problem 6","Number of gold medals","Number of silver medals","Number of bronze medals","Number of honorable mentions")
+)
+kable(country_results_df_variable, "html", caption = "Variable Description for country_result_df") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = FALSE, 
+                position = "center") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(3, width = "20em")
+```
+
+### `individual_results_df.csv` variable description
+
+```{r variable tables, echo=FALSE, warning=FALSE}
+individual_results_df_variable <- data.frame(
+  variable=c("year","contestant","country","p1","p2","p3","p4","p5","p6","total","award"),
+  class=c("integer", "character","character",rep("integer", 7),"character"),
+  discription=c("Year of IMO","Participants's name","Participant's country","Score on problem 1","Score on problem 2","Score on problem 3","Score on problem 4","Score on problem 5","Score on problem 6","Total score on all problems","Award won (Gold, Silver, Bronze, Honorable Mention)")
+)
+
+kable(individual_results_df_variable, "html", caption = "Variable Description for individual_result_df") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = FALSE, 
+                position = "center") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(3, width = "20em")
+```
+
+### Analytical Focus
+Main Question:
+How do returning participants influence a country's performance in IMO, and has this relationship changed over time?
+
+Three side questions for plotting:
+
+1. Award Proportion for First-Time vs. Returning Participants: Are returning participants more likely to win higher-tier awards?
+
+2. Individual Score Improvement: Do returning participants tend to achieve higher total scores on their subsequent attempts compared to their first?
+
+3. Team Performance Correlation: Do teams with more returning participants perform better?
+
+## Data Import and Processing
+This section outlines the steps taken to import, clean, and prepare the data for analysis. The data is sourced from the 2024-09-24 TidyTuesday release, which includes International Mathematical Olympiad (IMO) results.
+
+### Data Import
+The dataset is retrieved from the 2024-09-24 TidyTuesday release updated on GitHub.
+
+```{r Data Import, message=FALSE, warning=FALSE}
+country_results_df <-readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2024/2024-09-24/country_results_df.csv')
+individual_results_df <-readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2024/2024-09-24/individual_results_df.csv')
+```
+
+### Initial NA Inspection
+
+These summaries help us identify and prepare for necessary imputation before analysis.
+
+#### Country-Level NA Inspection
+
+```{r Country-Level NA Inspection, echo=FALSE}
+country_results_df_1 <- country_results_df
+country_results_df_1 %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Missing") %>%
+  gt() %>%
+  tab_header(title = "Missing Values in `country_results_df`")
+```
+
+#### Individual-Level NA Inspection
+```{r Individual-Level NA Inspection, , echo=FALSE}
+individual_results_df_1 <- individual_results_df
+individual_results_df_1 %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Missing") %>%
+  gt() %>%
+  tab_header(title = "Missing Values in `individual_results_df`")
+```
+
+### Filtering records after year 2000
+
+We narrow our focus to records after year 2000 to ensure consistency and quality of data.
+
+```{r Country-level Filtering}
+country_results_df <- country_results_df %>%
+  filter(year >= 2000)
+```
+
+```{r Individual-level Filtering}
+individual_results_df <- individual_results_df %>%
+  filter(year >= 2000)
+```
+
+### Selecting columns for our visualization
+
+In this part, we only select columns that we will use for our visualization, dropping columns like `team_size_male` and `leader`.
+
+```{r Country-level Selecting}
+country_results_df <- country_results_df %>%
+  select(year, country, team_size_all, p1, p2, p3, p4, p5, p6, 
+         awards_gold, awards_silver, awards_bronze, 
+         awards_honorable_mentions)
+```
+
+#### Country-level NA Inspection After Column Selection
+```{r Country-level NA Inspection After Column Selection, echo=FALSE}
+country_results_df_2 <- country_results_df
+country_results_df_2 %>% 
+  summarise(across(everything(), ~ sum(is.na(.))))%>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Missing") %>%
+  gt() %>%
+  tab_header(title = "Missing Values in `country_results_df` After Column Selection")
+```
+
+
+```{r Individual-level Selecting}
+individual_results_df <- individual_results_df %>%
+  select(year, contestant, country, p1, p2, p3, p4, p5, p6, total, award)
+```
+
+#### Individual-level NA Inspection After Column Selection
+```{r Individual-level NA Inspection After Column Selection, echo=FALSE}
+individual_results_df_2 <- individual_results_df
+individual_results_df_2 %>% 
+  summarise(across(everything(), ~ sum(is.na(.))))%>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Missing") %>%
+  gt() %>%
+  tab_header(title = "Missing Values in `individual_results_df` After Column Selection")
+```
+
+
+### Handling records with NA
+
+Since there is very little missing records in `country_results_df`, we simply drop the records with missing values.
+
+```{r Country-level NA handling}
+country_results_df <- country_results_df %>%
+  na.omit()
+```
+
+For `individual_results_df`, we observe that only `award` has missing values, and in fact a lot of missing values. So we will impute the missing values with "No award", because it is highly likely those records are valid since the other columns like the total score are not missing, so they simply did not get any awards.
+
+```{r Individual-level NA handling}
+individual_results_df <- individual_results_df %>%
+  mutate(award = ifelse(is.na(award), "No award", award))
+```
+
+### Scope of this project
+
+```{r Counting Distinct Countries, echo=FALSE}
+country_results_df %>%
+  summarise(n = n_distinct(country)) %>% 
+  gt()%>%
+  tab_header(title = "Distinct Countries")
+```
+
+Given the large number of participation countries (133), we narrow our focus to the top 5 countries in 2024, based on total performance.
+
+#### Selecting Top 5 Countries from 2024
+
+We select the top 5 countries from 2024 based on their total team score that year.
+```{r Selecting Top 5 Countries from 2024}
+top_5_countries_in_2024 <- country_results_df %>%
+  filter(year == 2024) %>%
+  mutate(total = rowSums(across(p1:p6))) %>%
+  arrange(desc(total), 
+          desc(awards_gold), 
+          desc(awards_silver), 
+          desc(awards_bronze), 
+          desc(awards_honorable_mentions)) %>%
+  head(5) %>%
+  pull(country)
+```
+
+#### Verifying Data Availability Since 2000
+
+```{r Verifying Data Availability Since 2000, echo=FALSE}
+country_results_df_3 <- country_results_df
+country_results_df_3 %>% 
+  filter(country %in% top_5_countries_in_2024) %>%
+  group_by(country) %>%
+  arrange(country) %>%
+  summarise(count = n()) %>%
+  ungroup() %>% 
+  gt() %>%
+  tab_header(title = "Available Country Records Since 2000")
+
+```
+
+It turns out that there is one missing record for India, but it should not be a problem for our visualization.
+
+### Standardization
+
+To ensure comparability across years and exams of varying difficulty, we standardize scores using z-score normalization within each year, and accounting all countries for the summary statistics. After that, we filter the top 5 countries in 2024 and drop p1 to p6 columns because total_team_score is all we need. Moving on, we will be using `standardized_score` as an indicator of performance.
+
+```{r Team-level Standardization}
+team_performance_std <- country_results_df %>%
+  mutate(total_team_score = p1 + p2 + p3 + p4 + p5 + p6) %>%
+  group_by(year) %>%
+  mutate(
+    mean_score = mean(total_team_score),
+    sd_score   = sd(total_team_score),
+    standardized_score = (total_team_score - mean_score) / sd_score) %>%
+  ungroup() %>%
+  filter(country %in% top_5_countries_in_2024) %>%
+  select(-(p1:p6))
+```
+
+```{r Individual-level Standardization}
+individual_performance_std <- individual_results_df %>%
+  group_by(year) %>%
+  mutate(mean_score = mean(total),
+    sd_score   = sd(total),
+    standardized_score = (total - mean_score) / sd_score) %>%
+  ungroup() %>%
+  filter(country %in% top_5_countries_in_2024) %>%
+  select(-(p1:p6)) 
+```
+
+To identify returning participants, we first grouped the data by individual contestants and ordered their entries chronologically by year. Using the `row_number()` function, we assigned a participation count to each appearance. Any participant with an appearance number greater than one was labeled as a returning participant, indicating they had competed in the IMO more than once.
+
+```{r Identifying returning participants}
+individual <- individual_performance_std %>%
+  arrange(contestant, year) %>%
+  group_by(contestant) %>%
+  mutate(appearance = row_number()) %>%
+  ungroup() %>%
+  mutate(returning = if_else(appearance > 1, 1, 0))
+```
+
+### Summary
+
+We focus on the top 5 countries in the 2024 IMO and limit the data to post-1999 to ensure consistency, completeness, and high data quality. These countries participate regularly, allowing for reliable inter-year comparisons within similar competitive environments. Their consistent success and high standards make them ideal for analyzing how returning participants impact individual and team performance. Limiting the scope also simplifies the analysis by reducing variability, making patterns and trends easier to interpret.
+
+Here we report 2 key summary statistics based on the cleaned dataset `team_performance_std` and `individual_performance_std`. First, we show the number of participants who got medals (gold, silver, and bronze) in a table among the top 5 countries in 2024.
+
+```{r Award distribution, echo = FALSE, warning=FALSE}
+filtered_award_distribution <- individual_performance_std %>%
+  filter(award %in% c("Gold medal", "Silver medal", "Bronze medal")) %>%
+  group_by(award) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  mutate(
+    award = factor(award, levels = c("Gold medal", "Silver medal", "Bronze medal")),
+    percentage = count / sum(count) * 100
+  ) %>%
+  arrange(award)
+
+kable(filtered_award_distribution, format = "html", caption = "Distribution of Gold, Silver, and Bronze Medals (Top 5 Countries, 2000–2024)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = FALSE, 
+                position = "center") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2:3, width = "10em") %>%
+  add_header_above(c(" " = 1, "Medal Count Summary" = 2))
+```
+
+According to IMO regulations, the distribution of gold, silver, and bronze medals is typically maintained in an approximate 1:2:3 ratio across all participating countries (International Mathematical Olympiad [IMO], 2024). However, since this study is scoped to only the top 5 performing countries, the observed medal distribution is heavily skewed, with gold medals outnumbering both silver and bronze. This skew is expected, as elite teams are more likely to cluster at the upper end of the score spectrum.
+
+Next, we will explore the proportion of returning participants among all participants from top 5 countries in 2024.
+
+
+```{r Returning proportion, echo = FALSE, warning=FALSE}
+top5_returning_summary <- individual %>%
+  ungroup() %>%
+  summarise(total_contestants = n(),
+            returning = sum(appearance > 1),
+            returning_percentage = returning / total_contestants * 100,
+            .groups = "drop")
+kable(top5_returning_summary, "html", caption = "Summary Table of Returning Participant (Top 5 Countries, 2000-2024)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = F, 
+                position = "center") %>%
+  column_spec(1, bold = F) %>%
+  column_spec(3, width = "20em")
+```
+
+Between 2000 and 2024 there are 744 contestants from the top 5 countries in the IMO data set. Of these, 191 (or 25.7%) are returning participants. In other words, more than one‐fourth of IMO entries from the top 5 countries during this period come from students with prior competition experience.
+
+
+
+## Question 1: Are returning participants more likely to win higher-tier awards?
+
+### Objective
+
+This question explores whether returning participants, those who have competed in the IMO more than once, are more likely to receive higher-tier awards (e.g., gold, silver) compared to first-time participants. By analyzing the distribution of award types among the two groups, we aim to uncover whether prior competition experience confers a measurable advantage in performance recognition.
+
+### Aggregating data
+
+To compare award outcomes between first-time and returning participants, we first group the data by participant type and award category, counting how many of each award were earned. Note that debut of returning participants in this instance is also counted as first-timers. To enable meaningful comparisons despite different group sizes, we convert these counts into proportions within each participant type. This reveals how the distribution of Gold, Silver, Bronze, and Honourable Mention awards differs between first-time and returning participants.
+
+```{r Award proportion, message=FALSE}
+award_proportion <- individual %>% 
+  mutate(returning = factor(returning), award = factor(award, level = c("Gold medal", "Silver medal", "Bronze medal", "Honourable mention", "No award"))) %>%
+  group_by(returning, award) %>%
+  summarise(award_count = n()) %>%
+  ungroup() %>%
+  group_by(returning) %>%
+  mutate(award_proportion = award_count / sum(award_count))
+```
+
+### Visualization 
+
+We use a grouped bar chart to compare the distribution of award types between first-timers and returning participants.
+
+```{r Plot 1}
+ggplot(award_proportion, aes(x = award, y = award_proportion, fill = returning)) +
+  geom_col(position = position_dodge(width = 0.9), width = 0.8) +
+  labs(
+    title = "Award Proportion by Participation Type",
+    subtitle = "Top 5 Countries in IMO (2000-2024)",
+    x = "Award Type",
+    y = "Proportion by participation type",
+    fill = "Participation Type"
+  ) +
+  scale_fill_discrete(
+    labels = c("First-timer", "Returning Participant")
+  ) +
+  scale_y_continuous(limits = c(0, 0.6)) +
+  theme(axis.text.x = element_text(size = 8))
+```
+
+## Question 2: Do returning participants tend to achieve higher total scores on their subsequent attempts compared to their first?
+
+### Objective
+
+This section investigates whether returning participants, those who have participated in the IMO more than once, tend to perform better than when they first joined. We restrict our analysis to individuals who appear in the dataset at least twice, comparing their first-time scores versus their returning scores to control for individual ability.
+
+### Aggregating data
+
+We first isolate participants who have competed more than once, then label each of their entries as either their debut or reappearance. This enables a clean comparison of performance progression within the same individuals.
+
+```{r Returning contestants}
+individual_returning <- individual %>% 
+  group_by(contestant) %>%
+  filter(n() >= 2) %>%  # We only keep all the records of returning participants, including their first participation
+  ungroup() %>%
+  mutate(participation_type = if_else(returning == 0, "Debut", "Reappearance"))
+```
+ 
+We then estimate the density distribution of standardized scores for debut and reappearance entries. This visualizes how performance tends to shift between first-time and subsequent participations. Additionally, we calculate the median standardized score for each group to provide a summary measure of central tendency.
+
+```{r Preparing data for plot 2}
+# Density curves
+dens_data <- individual_returning %>%
+  group_by(participation_type) %>%
+  summarise(density_obj = list(density(standardized_score)), .groups = "drop") %>%
+  mutate(
+    x = map(density_obj, ~ .x$x),
+    y = map(density_obj, ~ .x$y)
+  ) %>%
+  select(participation_type, x, y) %>%
+  unnest(cols = c(x, y))
+
+# Median standardized score
+median_scores <- individual_returning %>%
+  group_by(participation_type) %>%
+  summarise(median_score = median(standardized_score))
+
+```
+
+### Visualization
+
+We generate smoothed density plots to visualize the distribution of standardized scores for first participation and subsequent participation. Additionally, we mark the median standardized score for each group using dashed vertical lines.
+
+```{r Plot 2}
+ggplot(dens_data, aes(x = x, y = y, group = participation_type)) +
+  geom_area(aes(fill = participation_type), alpha = 0.6, position = "identity") +
+  geom_vline(data = median_scores, aes(xintercept = median_score, color = participation_type),
+             linetype = "dashed", linewidth = 1) +
+  annotate("text", 
+           x = median_scores$median_score[1] - 0.8,
+           y = max(dens_data$y) * 1.05, 
+           label = "Median (Debut)",
+           color = "#F8766D", size = 3) +
+  annotate("text", 
+           x = median_scores$median_score[2] + 1.3,
+           y = max(dens_data$y) * 1.05, 
+           label = "Median (Reappearance)",
+           color = "#00BFC4", size = 3) +
+  labs(
+    title = "Debut vs. Reappearance Performance for Returning Participants",
+    subtitle = "Top 5 Countries in IMO (2000-2024)",
+    x = "Standardized Score",
+    y = "Density",
+    fill = "Participation Type",
+    color = "Participation Type"
+  ) +
+  scale_fill_manual(
+    name = "Participation Type",
+    values = c("Debut" = "#F8766D", "Reappearance" = "#00BFC4"),
+    labels = c("Debut (First Participation)", "Reappearance (Subsequent Participation)")
+  ) +
+  scale_color_manual(
+    name = "Participation Type",
+    values = c("Debut" = "#F8766D", "Reappearance" = "#00BFC4"),
+    labels = c("Debut (First Participation)", "Reappearance (Subsequent Participation)")
+  ) +
+  scale_y_continuous(limits = c(0, 0.6))
+
+```
+
+
+## Question 3: Do teams with more returning participants perform better?
+
+### Objective
+
+The aim of this analysis is to evaluate whether a higher proportion of returning participants on a team is associated with better overall team performance in the IMO. The hypothesis is that teams with more experienced participants might perform better due to cumulative knowledge, confidence, and preparation efficiency.
+
+### Aggregating data
+
+To assess the impact of returning participants at the team level, we first calculate the number of returning participants in each country-year team. This is done by summing the returning indicator within each team. We then merge this information with overall team size data to compute the proportion of returning participants per team. This proportion will later be used to examine its relationship with team performance.
+
+```{r Calculating the proportion}
+returning_summary <- individual %>%
+  group_by(country, year) %>%
+  summarize(returning_count = sum(returning), .groups = "drop")
+
+returning_summary <- returning_summary %>%
+  left_join(
+    team_performance_std %>% select(country, year, team_size_all, standardized_score), 
+    by = c("country", "year")
+  ) %>%
+  mutate(proportion_returning = returning_count / team_size_all)
+```
+
+To improve the interpretability of visualizations, we order countries based on their average team performance. First, we calculate the average standardized team score for each country across all years. Countries are then arranged from lowest to highest average score. This ordered list is used to set the factor levels of the country variable, ensuring that the scatter plot display countries in a performance-based sequence rather than alphabetical order. This helps highlight performance trends more clearly across countries.
+
+```{r Ordering countries}
+country_order <- returning_summary %>%
+  group_by(country) %>%
+  summarise(avg_score = mean(standardized_score, na.rm = TRUE)) %>%
+  arrange(avg_score) %>%
+  pull(country)
+
+returning_summary <- returning_summary %>%
+  mutate(country = factor(country, levels = country_order))
+```
+
+### Visualization
+
+We use a scatter plot with linear trend lines to observe the relationship between the proportion of returning participants and standardized team scores. The plots are faceted by country to allow for within-country trend evaluation.
+
+```{r Plot 3, message=FALSE}
+ggplot(returning_summary, aes(x = proportion_returning, y = standardized_score, color = country)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Team Performance vs. Proportion of Returning Participants",
+    subtitle = "Top 5 Countries in IMO (2000-2024)",
+    x = "Proportion of Returning Participants",
+    y = "Total Team Score (Standardized)",
+    color = "Country"
+  ) +
+  facet_wrap(~ country, ncol = 5) +
+  theme(
+    strip.text = element_blank(),
+    legend.position = "top",
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.title.x = element_text(margin = margin(t = 12))
+  ) +
+  guides(color = guide_legend(nrow = 2))
+```
+
+## Discussion
+
+### Interpretation of Plot 1
+```{r Plot1, echo = FALSE}
+ggplot(award_proportion, aes(x = award, y = award_proportion, fill = returning)) +
+  geom_col(position = position_dodge(width = 0.9), width = 0.8) +
+  labs(
+    title = "Award Proportion by Participation Type",
+    subtitle = "Top 5 Countries in IMO (2000-2024)",
+    x = "Award Type",
+    y = "Proportion by participation type",
+    fill = "Participation Type"
+  ) +
+  scale_fill_discrete(
+    labels = c("First-timer", "Returning Participant")
+  ) +
+  scale_y_continuous(limits = c(0, 0.6)) +
+  theme(axis.text.x = element_text(size = 8))
+```
+
+The grouped bar chart compares the distribution of award types between first-time and returning IMO participants. The y-axis shows the proportion of each award type within each group, allowing us to assess how participation type relates to performance level.
+
+1. Gold Medals: Clear Advantage for Returnees
+   - Returning participants have a notably higher proportion of gold medal winners compared to first-timers.
+   - This suggests that prior IMO experience is strongly associated with top-tier performance, likely due to improved preparation, reduced anxiety, or deeper familiarity with the question style and pacing.
+
+2. Silver Medals: Roughly Equal
+   - Both returning participants and first-timers receive silver medals in similar proportions, indicating that while experience might not drastically shift mid-tier performance, it doesn’t diminish it either.
+
+3. Bronze Medals and Honourable Mentions: More Common Among First-Timers
+   - First-time participants have higher proportions of bronze medals and honourable mentions, awards often given for good (but not outstanding) performance.
+   - This distribution reinforces the idea that many first-time participants are capable but less likely to peak, while returnees more often break into the top tier.
+
+Returning participants are disproportionately represented among gold medalists, while first-timers are more likely to receive bronze or honourable mention awards. This suggests that experience is a competitive advantage at the highest levels of the IMO.
+
+### Interpretation of Plot 2
+```{r Plot2, echo = FALSE}
+ggplot(dens_data, aes(x = x, y = y, group = participation_type)) +
+  geom_area(aes(fill = participation_type), alpha = 0.6, position = "identity") +
+  geom_vline(data = median_scores, aes(xintercept = median_score, color = participation_type),
+             linetype = "dashed", linewidth = 1) +
+  annotate("text", 
+           x = median_scores$median_score[1] - 0.8,
+           y = max(dens_data$y) * 1.05, 
+           label = "Median (Debut)",
+           color = "#F8766D", size = 3) +
+  annotate("text", 
+           x = median_scores$median_score[2] + 1.3,
+           y = max(dens_data$y) * 1.05, 
+           label = "Median (Reappearance)",
+           color = "#00BFC4", size = 3) +
+  labs(
+    title = "Debut vs. Reappearance Performance for Returning Participants",
+    subtitle = "Top 5 Countries in IMO (2000-2024)",
+    x = "Standardized Score",
+    y = "Density",
+    fill = "Participation Type",
+    color = "Participation Type"
+  ) +
+  scale_fill_manual(
+    name = "Participation Type",
+    values = c("Debut" = "#F8766D", "Reappearance" = "#00BFC4"),
+    labels = c("Debut (First Participation)", "Reappearance (Subsequent Participation)")
+  ) +
+  scale_color_manual(
+    name = "Participation Type",
+    values = c("Debut" = "#F8766D", "Reappearance" = "#00BFC4"),
+    labels = c("Debut (First Participation)", "Reappearance (Subsequent Participation)")
+  ) +
+  scale_y_continuous(limits = c(0, 0.6))
+```
+
+```{r Welch t-test, echo = FALSE, include = FALSE}
+individual_participation_type_Debut <- individual_returning %>% 
+  filter(participation_type=="Debut") %>% 
+  select(standardized_score)
+
+individual_participation_type_Reappearance <- individual_returning %>% 
+  filter(participation_type=="Reappearance") %>% 
+  select(standardized_score)
+
+t.test(individual_participation_type_Debut, individual_participation_type_Reappearance, conf.level = 0.99)
+```
+
+The plot shows the distribution of standardized scores for IMO participants who have competed more than once, comparing their debut performances (red) to their subsequent reappearances (blue). Several key insights emerge:
+
+1. Performance Improves Upon Reappearance
+   - The median standardized score for participants during their reappearance is clearly shifted to the right of their debut score.
+   - This indicates that, on average, individuals perform better on their second or later attempts compared to their first.
+   - A Welch’s t-test confirms that this difference in means is statistically significant (p-value < 0.01), providing strong evidence that prior experience contributes to improved outcomes.
+   - This supports the hypothesis that exposure to the competition format, accumulated preparation, and increased confidence positively impact performance.
+
+2. Consistently Strong Performance Across Top Countries
+   - Both debut and reappearance score distributions are mostly above zero, indicating that even first-time performances from these top 5 countries tend to be stronger than the overall IMO average.
+   - This suggests a consistently high standard of performance across participants from these countries, regardless of participation history.
+
+This analysis highlights the benefits of prior experience on individual outcomes and also underscores the strength of top-performing countries, laying the groundwork for further investigation into team-level impacts in Question 3.
+
+### Interpretation of Plot 3
+```{r Plot3, echo = FALSE, message=FALSE}
+ggplot(returning_summary, aes(x = proportion_returning, y = standardized_score, color = country)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Team Performance vs. Proportion of Returning Participants",
+    subtitle = "Top 5 Countries in IMO (2000-2024)",
+    x = "Proportion of Returning Participants",
+    y = "Total Team Score (Standardized)",
+    color = "Country"
+  ) +
+  facet_wrap(~ country, ncol = 5) +
+  theme(
+    strip.text = element_blank(),
+    legend.position = "top",
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.title.x = element_text(margin = margin(t = 12))
+  ) +
+  guides(color = guide_legend(nrow = 2))
+```
+
+The faceted scatter plot displays the relationship between the proportion of returning participants and the standardized total team score for each of the top five countries. Each panel includes a linear trend line to reveal underlying correlation patterns.
+
+1. Positive Trends Across Most Countries
+   - For Belarus, India, Korea, and the United States, the trend lines slope upwards, suggesting a positive correlation between the proportion of returning participants and team performance.
+   - This aligns with the earlier findings from individual-level analysis: returnees tend to perform better, and when more returnees are present, teams generally benefit.
+   - The also aligns with findings from the International Olympiad in Informatics, where returnees similarly boosted team outcomes (Lee et al., 2024).
+
+2. China Is an Outlier
+   - The People’s Republic of China shows minimal variation in the proportion of returnees, yet maintains consistently high standardized scores.
+   - This suggests that China’s performance does not depend heavily on returnees, likely due to an extremely deep talent pool and strong pre-competition training that ensures high standards even among first-time participants.
+
+The interpretation of the slope reveals that while most countries show a positive relationship between the proportion of returning participants and team performance, the strength of this association varies. India and Korea display a clearer upward trend, suggesting that teams benefit more noticeably from having experienced participants. In contrast, the USA and Belarus exhibit a milder slope, indicating a weaker but still positive link. Interestingly, China maintains consistently high team performance regardless of the returnee rate, which may be attributed to structural advantages such as rigorous national selection processes or intensive training programs.
+
+### Overall Conclusion
+
+This study provides strong empirical evidence that returning participants perform better than first-timers, both at the individual level and often at the team level. Their advantage is reflected in:
+
+1. Increased likelihood of winning top-tier awards
+2. Higher average total scores
+3. Positive impact on team outcomes in most countries
+
+Hence, it can be deduced that encouraging and investing in returnee participation may be a valuable strategy for many countries seeking competitive advantage in the IMO. At the same time, comprehensive preparation programs can ensure that even first-time participants are positioned to succeed at the highest level.
+
+
+
+## Teamwork
+
+- Work Allocation:
+  - **Lim Fang Jun**: Data Cleaning & Processing + Plotting Ideation
+  - **Ong Wei Lun**: Plot 1 (Award Proportion by Participation Type)
+  - **Angel Bu Tong Mei**: Plot 2 (Debut vs Reappearance Performance for Returning Participants)
+  - **Lee Jia Hong**: Plot 3 (Team Performance vs. Proportion of Returning Participants)
+
+- Collaborative Tasks:
+  - Plot Refinement, Report Writing & Discussion (All members)
+
+
+
+## References
+
+1. International Mathematical Olympiad. (2024). Regulations of the International Mathematical Olympiad. https://www.imo-official.org/documents/RegulationsIMO.pdf
+
+2. Lee, E., Reizin, T., Wu, F. E., & Wu, F. E. (2024). Trends on returning contestants and geography at the International Olympiad in Informatics. *OLYMPIADS IN INFORMATICS*, 33–50. https://doi.org/10.15388/ioi.2024.03
+
+3. TidyTuesday. (2024). International Mathematical Olympiad results [Data set]. https://github.com/rfordatascience/tidytuesday/tree/master/data/2024/2024-09-24
